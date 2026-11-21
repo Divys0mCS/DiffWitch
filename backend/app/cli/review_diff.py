@@ -20,6 +20,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.logs import configure_logging, redact
+from app.services.agent import run_agent
 from app.services.llm import build_provider
 from app.services.llm.base import LLMConfigError, LLMError
 from app.services.quota import QuotaGuard
@@ -71,12 +72,13 @@ async def _run(args: argparse.Namespace, diff_text: str) -> int:
         head_sha=args.sha,
         diff=diff_text,
         base_ref=args.base,
-        mode="lite",
+        mode=args.mode,
     )
 
-    print(f"DiffWitch · reviewing {args.repo}#{args.pr} ({args.diff})")
+    print(f"DiffWitch · reviewing {args.repo}#{args.pr} ({args.diff}) in {args.mode} mode")
+    runner = review_diff if args.mode == "lite" else run_agent
     try:
-        outcome = await review_diff(
+        outcome = await runner(
             request,
             settings=settings,
             provider=provider,
@@ -121,6 +123,12 @@ def main() -> int:
     parser.add_argument("--sha", default="0" * 40, help="Head SHA")
     parser.add_argument("--base", default="main", help="Base ref")
     parser.add_argument("--out", help="Write the JSON review to this path")
+    parser.add_argument(
+        "--mode",
+        choices=["lite", "agent"],
+        default="lite",
+        help="lite = one LLM call, agent = bounded MCP tool loop",
+    )
     parser.add_argument(
         "--provider",
         choices=["env", "gemini", "fake"],

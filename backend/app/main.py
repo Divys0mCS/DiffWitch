@@ -1,21 +1,59 @@
-"""FastAPI application entrypoint."""
+"""FastAPI application entrypoint.
+
+One process serves the HTTP API, the worker loop (Phase 4) and the MCP endpoint,
+because the free tier allows exactly one backend service.
+"""
 
 from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from mcp.server.transport_security import TransportSecuritySettings
 
 from app import db
 from app.api import health
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.logs import configure_logging
+from app.mcp.server import BearerGuard, build_public_mcp_server
 
 logger = logging.getLogger(__name__)
+
+MCP_MOUNT_PATH = "/mcp"
+
+
+class McpPathMiddleware:
+    """Serve ``/mcp`` directly instead of redirecting to ``/mcp/``.
+
+    MCP clients post to the exact URL they were given; a 307 would break some of
+    them, so the path is normalised before routing.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") == "http" and scope.get("path") == MCP_MOUNT_PATH:
+            scope = dict(scope)
+            scope["path"] = MCP_MOUNT_PATH + "/"
+            scope["raw_path"] = (MCP_MOUNT_PATH + "/").encode()
+        await self.app(scope, receive, send)
+
+
+def _transport_security(settings: Settings) -> TransportSecuritySettings:
+    hosts = [item.strip() for item in settings.mcp_allowed_hosts.split(",") if item.strip()]
+    origins = [item.strip() for item in settings.mcp_allowed_origins.split(",") if item.strip()]
+    wildcard = "*" in hosts or "*" in origins
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=not wildcard,
+        allowed_hosts=[] if wildcard else hosts,
+        allowed_origins=[] if wildcard else origins,
+    )
 
 
 @asynccontextmanager
@@ -36,17 +74,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if ok:
             logger.info("database reachable (%.1f ms)", latency)
         else:
-            # Do not crash: Render should keep the service up and the pinger
-            # should still get a response while Neon wakes up.
+            # Do not crash: keep serving /health while Neon wakes up.
             logger.error("database unreachable at startup; check DATABASE_URL")
     else:
         logger.warning("DATABASE_URL is not set - database features are disabled")
 
-    try:
-        yield
-    finally:
-        await db.dispose_engine()
-        logger.info("shutdown complete")
+    async with AsyncExitStack() as stack:
+        session_manager = getattr(app.state, "mcp_session_manager", None)
+        if session_manager is not None:
+            try:
+                await stack.enter_async_context(session_manager.run())
+                logger.info("MCP endpoint ready at %s", MCP_MOUNT_PATH)
+            except Exception:  # noqa: BLE001 - never block startup on MCP
+                logger.exception("could not start the MCP session manager")
+
+        try:
+            yield
+        finally:
+            await db.dispose_engine()
+            logger.info("shutdown complete")
 
 
 def create_app() -> FastAPI:
@@ -69,6 +115,7 @@ def create_app() -> FastAPI:
         expose_headers=["X-Request-Id"],
         max_age=600,
     )
+    app.add_middleware(McpPathMiddleware)
 
     app.include_router(health.router)
 
@@ -80,8 +127,18 @@ def create_app() -> FastAPI:
                 "version": settings.version,
                 "docs": "/docs" if not settings.is_production else None,
                 "health": "/health",
+                "mcp": MCP_MOUNT_PATH,
             }
         )
+
+    # Read-only MCP surface in this same process, bearer-protected.
+    mcp_server = build_public_mcp_server()
+    mcp_app = mcp_server.streamable_http_app(
+        streamable_http_path="/",
+        transport_security=_transport_security(settings),
+    )
+    app.state.mcp_session_manager = mcp_server.session_manager
+    app.mount(MCP_MOUNT_PATH, BearerGuard(mcp_app, settings.dashboard_password))
 
     return app
 

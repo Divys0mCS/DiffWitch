@@ -156,6 +156,11 @@ async def init_engine(settings: Settings | None = None) -> AsyncEngine | None:
     return _engine
 
 
+def is_configured() -> bool:
+    """True once an engine exists (i.e. DATABASE_URL was present at startup)."""
+    return _engine is not None
+
+
 def get_engine() -> AsyncEngine:
     if _engine is None:
         raise RuntimeError("Database engine is not initialised (DATABASE_URL missing?)")

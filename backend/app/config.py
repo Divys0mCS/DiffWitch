@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 120.0
     llm_max_retries: int = 4
 
+    # ---- mcp endpoint ----
+    # Comma separated Host header allow-list for the read-only MCP endpoint.
+    # "*" disables DNS-rebinding protection; the endpoint still requires the
+    # dashboard password, so this is safe behind a proxy with a stable hostname.
+    mcp_allowed_hosts: str = "*"
+    mcp_allowed_origins: str = "*"
+
     # ---- review behaviour ----
     review_mode: ReviewMode = "lite"
     max_agent_steps: int = 3

@@ -22,6 +22,17 @@ def default_review_json(comment: dict[str, Any] | None = None) -> str:
     return json.dumps(payload)
 
 
+def default_agent_json(comment: dict[str, Any] | None = None) -> str:
+    """Agent-shaped response: finish immediately with the default review."""
+    return json.dumps(
+        {
+            "thought": "The diff is small enough to review directly.",
+            "tool": "post_review",
+            "review": json.loads(default_review_json(comment)),
+        }
+    )
+
+
 class FakeProvider:
     name = "fake"
     model = "fake-model"
@@ -62,6 +73,8 @@ class FakeProvider:
             text = self._responder(system, prompt)
         elif self._result_text is not None:
             text = self._result_text
+        elif "AGENT MODE" in system:
+            text = default_agent_json()
         else:
             text = default_review_json()
         return LLMResult(
