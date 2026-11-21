@@ -100,6 +100,61 @@ ruff format --check .
 Tests run against in-memory SQLite, so no database is required. The migration
 smoke test applies the whole Alembic chain and rolls it back.
 
+## 7. LLM provider (Phase 2)
+
+The LLM is behind `LLMProvider`, so the pipeline never imports a vendor SDK.
+Gemini is the first implementation.
+
+In `.env`:
+
+```dotenv
+LLM_PROVIDER=gemini
+LLM_MODEL=<the exact model id from AI Studio>
+GEMINI_API_KEY=<your key>
+LLM_RPM=5
+LLM_RPD=20
+DAILY_LLM_BUDGET=18
+```
+
+- `LLM_MODEL` is never hardcoded. If the model id is wrong you get
+  `Model '...' was not found for this API key.` and nothing else breaks.
+- `DAILY_LLM_BUDGET` is the number of LLM calls allowed per UTC day. It is
+  enforced in Postgres and is deliberately lower than `LLM_RPD` so a retry storm
+  cannot eat the whole allowance. `0` disables the cap.
+- `LLM_RPM` is a local sliding-window limiter. When the window is full the worker
+  waits instead of failing, and only gives up if the wait would exceed ~90 s.
+
+### Try the pipeline without a key (or without GitHub)
+
+```powershell
+python -m app.cli.review_diff --diff samples\sample.diff --repo owner\repo --pr 7 --provider fake
+```
+
+With a real key:
+
+```powershell
+python -m app.cli.review_diff --diff samples\sample.diff --repo owner\repo --pr 7 --out review.json
+```
+
+The CLI prints every step (filtering, the LLM call, token usage, the verdict) and
+prints the validated JSON review. Exit codes: `0` ok, `1` error, `2` skipped
+(quota or nothing reviewable).
+
+### What gets filtered before the LLM sees it
+
+Lockfiles, minified files, source maps, images/binaries, vendored folders and
+empty diffs are dropped and listed in the prompt's `FILTERED OUT` note. Large
+diffs are truncated **by whole hunk** (never mid-hunk), so every line number the
+model is shown really exists in the diff. Total prompt size is capped by
+`MAX_PROMPT_CHARS` and per-file size by `MAX_FILE_DIFF_CHARS`.
+
+### Prompt-injection defence
+
+PR titles, code and comments are wrapped in
+`<<<UNTRUSTED_PR_DATA_START>>>` / `<<<UNTRUSTED_PR_DATA_END>>>` blocks, the
+delimiters are stripped from the content first, and the system prompt states that
+nothing inside the block is an instruction.
+
 ## Troubleshooting
 
 **`asyncpg` build error on install** — you are on a Python version without a

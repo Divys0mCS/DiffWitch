@@ -1,0 +1,33 @@
+diff --git a/app/auth.py b/app/auth.py
+index 3f1c2aa..9b7d4e1 100644
+--- a/app/auth.py
++++ b/app/auth.py
+@@ -12,9 +12,14 @@ def load_user(user_id: str) -> User | None:
+     return db.get(User, user_id)
+ 
+ 
+-def check_password(user: User, password: str) -> bool:
+-    return user.password_hash == hashlib.md5(password.encode()).hexdigest()
++def check_password(user: User, password: str) -> bool:
++    digest = hashlib.md5(password.encode()).hexdigest()
++    return user.password_hash == digest
++
++
++def build_query(table: str, user_input: str) -> str:
++    return f"SELECT * FROM {table} WHERE name = '{user_input}'"
+ 
+ 
+ async def login(request: Request) -> Response:
+diff --git a/package-lock.json b/package-lock.json
+index 1111111..2222222 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,4 +1,5 @@
+ {
+   "name": "demo",
++  "version": "1.0.1",
+   "lockfileVersion": 3
+ }
+diff --git a/assets/logo.png b/assets/logo.png
+index 0000000..4444444 100644
+Binary files /dev/null and b/assets/logo.png differ
