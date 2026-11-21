@@ -78,15 +78,36 @@ uvicorn app.main:app --reload --port 8000
 
 ## Deploy
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/GITHUB_APP.md](docs/GITHUB_APP.md).
+Neon → Render → Vercel, then point the GitHub App's webhook at Render. Full
+walkthrough, including every environment variable and an uptime pinger:
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Creating and installing the App:
+[docs/GITHUB_APP.md](docs/GITHUB_APP.md). How it all fits together:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Screenshots
+## The dashboard
 
-_Placeholder — dashboard screenshots are added after Phase 5._
+A password-protected Next.js app: a runs ledger, a run page with the agent's
+reasoning trace streaming in live, a quota page that shows the Gemini budget
+before it runs out, and settings that override the review mode, caps and filters
+per run.
 
-| Runs | Run detail (live timeline) |
-| --- | --- |
-| _todo_ | _todo_ |
+![Login screen](docs/screenshots/login.png)
+
+Runs and run detail screenshots are added once the app is deployed against a real
+repository — the UI is built and type-checked, but a trace needs real LLM calls
+to photograph.
+
+## Dashboard quick start
+
+```powershell
+Set-Location frontend
+npm install
+Copy-Item .env.example .env.local
+# set NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 in .env.local
+npm run dev
+```
+
+Log in with the backend's `DASHBOARD_PASSWORD`. See [docs/SETUP.md](docs/SETUP.md#8-run-the-dashboard-frontend).
 
 ## Licence
 

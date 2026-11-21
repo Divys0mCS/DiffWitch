@@ -7,7 +7,7 @@ Everything below is PowerShell (Windows). No `export`, no `&&`, no `rm -rf`.
 | Tool | Version | Notes |
 | --- | --- | --- |
 | Python | 3.14.x or 3.12.x | Every pinned dependency ships a cp314 wheel, so 3.14 works. Render uses 3.12.8. |
-| Node.js | 20+ | Frontend only (Phase 5). |
+| Node.js | 20+ | Dashboard. |
 | Git | any | |
 | Neon account | free tier | Database. |
 | Google AI Studio key | free tier | LLM. |
@@ -59,6 +59,16 @@ Fill in:
 - `DATABASE_URL` — Neon **pooled** connection string (Project → Connection Details →
   *Pooled connection*). Keep `?sslmode=require`; the backend translates it for asyncpg.
 - `FRONTEND_ORIGIN` — `http://localhost:3000` for local development.
+- `DASHBOARD_PASSWORD` — any password you choose; this is what you type on the
+  login page and what the `/mcp` endpoint expects as its bearer token.
+- `SESSION_SECRET` — the key used to sign dashboard sessions. Generate one:
+
+  ```powershell
+  python -c "import secrets; print(secrets.token_urlsafe(56))"
+  ```
+
+  Leave it empty in development and the app signs with `DASHBOARD_PASSWORD`
+  instead (fine locally, never in production).
 
 The app starts without a database (it logs a warning and `/health` reports
 `db: not_configured`) so you can boot it before Neon exists.
@@ -155,6 +165,50 @@ PR titles, code and comments are wrapped in
 delimiters are stripped from the content first, and the system prompt states that
 nothing inside the block is an instruction.
 
+## 8. Run the dashboard (frontend)
+
+```powershell
+Set-Location ..\frontend
+npm install
+Copy-Item .env.example .env.local
+notepad .env.local
+```
+
+Set the API URL (no trailing slash):
+
+```dotenv
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+```
+
+```powershell
+npm run dev
+```
+
+Open <http://localhost:3000>, sign in with `DASHBOARD_PASSWORD`, and the runs
+ledger appears. `npm run build` is the same check CI-style: it type-checks and
+builds every route.
+
+Production build locally:
+
+```powershell
+npm run build
+npm run start
+```
+
+## 9. Worker, MCP endpoint and events
+
+- The worker starts with the app (`WORKER_ENABLED=true`) — no separate process,
+  no extra Render service. On boot it requeues jobs that were stuck in `running`
+  when the previous instance died.
+- Read-only MCP server: `http://127.0.0.1:8000/mcp/` with
+  `Authorization: Bearer <DASHBOARD_PASSWORD>`.
+- Queue inspection (SQL, Neon SQL editor):
+
+  ```sql
+  SELECT status, count(*) FROM jobs GROUP BY status;
+  SELECT id, status, skip_reason, error FROM review_runs ORDER BY created_at DESC LIMIT 10;
+  ```
+
 ## Troubleshooting
 
 **`asyncpg` build error on install** — you are on a Python version without a
@@ -166,3 +220,15 @@ one containing `app/`).
 **`ssl` errors connecting to Neon** — make sure you copied the pooled string with
 `?sslmode=require`, and that the password in the URL is percent-encoded if it
 contains `@`, `:`, `/` or `#`.
+
+**Dashboard says "waking up the server…" forever** — the browser cannot reach
+`NEXT_PUBLIC_API_URL`. It must be reachable from the browser, not just from the
+shell: `127.0.0.1:8000` works only if the backend runs on the same machine, and a
+changed value needs `npm run build` (it is baked in at build time).
+
+**Login returns 401** — the password does not match `DASHBOARD_PASSWORD`. If the
+backend has no password set it returns `503` instead.
+
+**SSE connects then immediately falls back to polling** — a proxy is buffering
+the stream. On Render this does not happen; behind a local proxy, disable
+buffering for `/api/runs/*/events`.
