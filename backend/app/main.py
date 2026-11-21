@@ -1,7 +1,7 @@
 """FastAPI application entrypoint.
 
-One process serves the HTTP API, the worker loop (Phase 4) and the MCP endpoint,
-because the free tier allows exactly one backend service.
+One process serves the HTTP API, the queue worker and the MCP endpoint, because
+the free tier allows exactly one backend service.
 """
 
 from __future__ import annotations
@@ -17,10 +17,12 @@ from fastapi.responses import JSONResponse
 from mcp.server.transport_security import TransportSecuritySettings
 
 from app import db
-from app.api import health
+from app.api import auth, health, runs, usage, webhooks
+from app.api import settings as settings_api
 from app.config import Settings, get_settings
 from app.logs import configure_logging
 from app.mcp.server import BearerGuard, build_public_mcp_server
+from app.services.worker import Worker
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +30,7 @@ MCP_MOUNT_PATH = "/mcp"
 
 
 class McpPathMiddleware:
-    """Serve ``/mcp`` directly instead of redirecting to ``/mcp/``.
-
-    MCP clients post to the exact URL they were given; a 307 would break some of
-    them, so the path is normalised before routing.
-    """
+    """Serve ``/mcp`` directly instead of redirecting to ``/mcp/``."""
 
     def __init__(self, app: Any) -> None:
         self.app = app
@@ -74,11 +72,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if ok:
             logger.info("database reachable (%.1f ms)", latency)
         else:
-            # Do not crash: keep serving /health while Neon wakes up.
             logger.error("database unreachable at startup; check DATABASE_URL")
     else:
         logger.warning("DATABASE_URL is not set - database features are disabled")
 
+    worker: Worker | None = None
     async with AsyncExitStack() as stack:
         session_manager = getattr(app.state, "mcp_session_manager", None)
         if session_manager is not None:
@@ -88,9 +86,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             except Exception:  # noqa: BLE001 - never block startup on MCP
                 logger.exception("could not start the MCP session manager")
 
+        if settings.database_configured and settings.worker_enabled:
+            worker = Worker(settings)
+            try:
+                await worker.start()
+            except Exception:  # noqa: BLE001
+                logger.exception("worker failed to start")
+                worker = None
+        else:
+            logger.info("worker disabled (WORKER_ENABLED=false or no database)")
+
         try:
             yield
         finally:
+            if worker is not None:
+                await worker.stop()
             await db.dispose_engine()
             logger.info("shutdown complete")
 
@@ -118,6 +128,11 @@ def create_app() -> FastAPI:
     app.add_middleware(McpPathMiddleware)
 
     app.include_router(health.router)
+    app.include_router(auth.router)
+    app.include_router(runs.router)
+    app.include_router(usage.router)
+    app.include_router(settings_api.router)
+    app.include_router(webhooks.router)
 
     @app.get("/", include_in_schema=False)
     async def root() -> JSONResponse:
