@@ -84,6 +84,23 @@ walkthrough, including every environment variable and an uptime pinger:
 [docs/GITHUB_APP.md](docs/GITHUB_APP.md). How it all fits together:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## CLI
+
+The reviewer also runs on a local diff, with no GitHub App and no database.
+Published to PyPI on each `v*` tag (after the first release):
+
+```powershell
+pip install diffwitch
+$env:GEMINI_API_KEY = "<your AI Studio key>"
+$env:LLM_MODEL = "<exact model id from AI Studio>"
+git diff main...HEAD | Out-File -Encoding utf8 sample.diff
+diffwitch --diff sample.diff --repo owner/name --pr 12
+```
+
+`--provider fake` runs the whole pipeline offline. Exit codes: `0` ok, `1`
+error, `2` skipped (quota, or nothing reviewable). Release instructions:
+[docs/PUBLISHING.md](docs/PUBLISHING.md).
+
 ## The dashboard
 
 A password-protected Next.js app: a runs ledger, a run page with the agent's
