@@ -27,6 +27,13 @@ jobs:
       - name: Install build tooling
         run: python -m pip install --upgrade build
 
+      - name: Install backend dev requirements
+        run: python -m pip install -r backend/requirements-dev.txt
+
+      - name: Run the backend test suite
+        working-directory: backend
+        run: python -m pytest
+
       - name: Check the tag matches the package version
         if: startsWith(github.ref, 'refs/tags/')
         env:
