@@ -7,6 +7,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from app.config import get_settings
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -25,13 +26,21 @@ EXPECTED_TABLES = {
 
 
 def test_migration_upgrade_and_downgrade(tmp_path, monkeypatch):
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     db_path = tmp_path / "migration.db"
+    url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+    # alembic/env.py resolves DATABASE_URL -> settings (which read backend/.env)
+    # -> the config file, so deleting the variable is not enough: a developer's
+    # .env would point the migration at a real database. Pin the variable and
+    # drop the cached settings so the temp SQLite file always wins.
+    monkeypatch.setenv("DATABASE_URL", url)
+    get_settings.cache_clear()
     config = Config(str(BACKEND_DIR / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
-    config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    config.set_main_option("sqlalchemy.url", url)
 
     command.upgrade(config, "head")
+
+    assert db_path.exists(), "the migration did not run against the temp SQLite file"
 
     with sqlite3.connect(db_path) as conn:
         tables = {
