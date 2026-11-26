@@ -1,0 +1,36 @@
+name: keepalive
+
+# Pings the Render backend so the free instance does not spin down (~15 min idle)
+# before a demo. Runs on GitHub's scheduler; see docs/KEEPALIVE.md.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping the Render health endpoint
+        env:
+          HEALTH_URL: https://diffwitch-api.onrender.com/health
+        run: |
+          set -euo pipefail
+          body=$(mktemp)
+          code=$(curl -sS --max-time 120 --retry 2 --retry-delay 20 --retry-all-errors \
+            -o "$body" -w '%{http_code} %{time_total}' "$HEALTH_URL" | cut -d' ' -f1)
+          echo "HTTP $code"
+          cat "$body"
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::error::health check returned HTTP $code"
+            exit 1
+          fi

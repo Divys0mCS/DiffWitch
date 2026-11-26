@@ -46,7 +46,7 @@ PR opened ──▶ GitHub webhook ──▶ FastAPI (Render free) ──▶ job
 
 | Constraint | How DiffWitch handles it |
 | --- | --- |
-| Render sleeps after ~15 min | Uptime pinger hits `/health` every 10 min; dashboard shows a "waking up" state with retry. |
+| Render sleeps after ~15 min | [`.github/workflows/keepalive.yml`](.github/workflows/keepalive.yml) pings `/health` every 10 min ([notes](docs/KEEPALIVE.md)); dashboard shows a "waking up" state with retry. |
 | Render has an ephemeral disk | Nothing is written to disk. Postgres is the only store. |
 | No Redis | `jobs` table + `FOR UPDATE SKIP LOCKED` claim, worker loop in the FastAPI lifespan. |
 | One free service | The MCP server runs in the same FastAPI process. |
