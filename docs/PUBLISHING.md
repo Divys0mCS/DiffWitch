@@ -37,7 +37,9 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The `publish-cli` workflow builds the wheel and uploads it. `workflow_dispatch`
+The `publish-cli` workflow installs the backend dev requirements, runs
+`ruff check` and `ruff format --check`, runs the test suite, then builds the
+wheel and uploads it — a lint or test failure stops the upload. `workflow_dispatch`
 runs the same job by hand.
 
 ## Building locally first
